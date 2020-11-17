@@ -77,6 +77,23 @@ void initCache(){
 char* getContentType(char * mybuf) {
   // Should return the content type based on the file type in the request
   // (See Section 5 in Project description for more details)
+  char *type;
+	char* signature = strtok(mybuf, '.');
+
+	if(strcmp(signature, "html")){
+		type = "text/html";
+	}
+	else if (strcmp(signature, "jpg")){
+		type = "image/jpeg";
+	}
+	else if(strcmp(signature,"gif")){
+		type = "image/gif";
+	}
+	else{
+		type = "text/plain";
+	}
+
+	return type;
 }
 
 // Function to open and read the file from the disk into the memory
@@ -145,6 +162,21 @@ int main(int argc, char **argv) {
   // Start the server
 
   // Create dispatcher and worker threads (all threads should be detachable)
+  pthread_t dispatcherID;
+  char* dummy_arg = "this is just to test the pthread_create";
+  if (pthread_create(&dispatcherID, NULL, dispatch, (void*) dummy_arg)) {
+    printf("failed to create dispatcher thread\n");
+  } else {
+    printf("created dispatcher thread\n");
+  }
+
+  pthread_t workerID;
+  if (pthread_create(&workerID, NULL, worker, (void*) dummy_arg)) {
+    printf("failed to create dispatcher thread\n");
+  } else {
+    printf("created dispatcher thread\n");
+  }
+
 
   // Create dynamic pool manager thread (extra credit A)
 
