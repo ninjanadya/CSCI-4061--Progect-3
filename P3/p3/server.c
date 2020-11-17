@@ -77,6 +77,23 @@ void initCache(){
 char* getContentType(char * mybuf) {
   // Should return the content type based on the file type in the request
   // (See Section 5 in Project description for more details)
+	char *type;
+	char* signature = strtok(mybuf, '.');
+		
+	if(strcmp(signature, "html")){
+		type = "text/html";
+	}
+	else if (strcmp(signature, "jpg")){
+		type = "image/jpeg";
+	}
+	else if(strcmp(signature,"gif")){
+		type = "image/gif";
+	}
+	else{
+		type = "text/plain";
+	}
+
+	return type;
 }
 
 // Function to open and read the file from the disk into the memory
