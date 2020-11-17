@@ -77,9 +77,15 @@ void initCache(){
 char* getContentType(char * mybuf) {
   // Should return the content type based on the file type in the request
   // (See Section 5 in Project description for more details)
+<<<<<<< HEAD
   char *type;
 	char* signature = strtok(mybuf, '.');
 
+=======
+	char *type;
+	char* signature = strtok(mybuf, '.');
+		
+>>>>>>> 0b0bd0cc4c54b70e0556927bdffa4dd0e72b1da1
 	if(strcmp(signature, "html")){
 		type = "text/html";
 	}
