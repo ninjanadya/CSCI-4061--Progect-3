@@ -36,6 +36,28 @@ typedef struct cache_entry {
     char *content;
 } cache_entry_t;
 
+request_t queue[MAX_queue_len];
+int enqueue_index = 0;
+int dequeue_index = 0;
+
+request_t dequeue() {
+  request_t temp = queue[dequeue_index];
+  dequeue_index++;
+  dequeue_index = dequeue_index % MAX_queue_len;
+  return temp;
+}
+
+void enqueue(request_t r) {
+  queue[enqueue_index] = r;
+  enqueue_index++;
+  dequeue_index = dequeue_index % MAX_queue_len;
+}
+
+bool empty_queue() {
+  return enqueue_index == dequeue_index;
+}
+
+
 /* ******************** Dynamic Pool Code  [Extra Credit A] **********************/
 // Extra Credit: This function implements the policy to change the worker thread pool dynamically
 // depending on the number of requests
@@ -77,15 +99,10 @@ void initCache(){
 char* getContentType(char * mybuf) {
   // Should return the content type based on the file type in the request
   // (See Section 5 in Project description for more details)
-<<<<<<< HEAD
   char *type;
-	char* signature = strtok(mybuf, '.');
+  const char* delimiter = ",";
+	char* signature = strtok(mybuf, delimiter);
 
-=======
-	char *type;
-	char* signature = strtok(mybuf, '.');
-		
->>>>>>> 0b0bd0cc4c54b70e0556927bdffa4dd0e72b1da1
 	if(strcmp(signature, "html")){
 		type = "text/html";
 	}
@@ -168,6 +185,17 @@ int main(int argc, char **argv) {
   // Start the server
 
   // Create dispatcher and worker threads (all threads should be detachable)
+
+  request_t temp;
+  temp.fd = 1;
+  temp.request = "test";
+  if (empty_queue) {
+    printf("empty queue\n");
+  }
+  enqueue(temp);
+  request_t r = dequeue();
+  printf("%d, %s\n", r.fd, r.request);
+
   pthread_t dispatcherID;
   char* dummy_arg = "this is just to test the pthread_create";
   if (pthread_create(&dispatcherID, NULL, dispatch, (void*) dummy_arg)) {
