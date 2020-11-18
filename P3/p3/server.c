@@ -140,10 +140,10 @@ char* getContentType(char * mybuf) {
 // Add necessary arguments as needed
 int readFromDisk(int fd, char* buffer, int n_bytes) {
     // Open and read the contents of file given the request
-    printf("reading %d bytes\n", n_bytes);
+    printf("attempting to read %d bytes\n", n_bytes);
     int nread = read(fd, buffer, n_bytes);
     printf("nread is %d\n", nread);
-    printf("%s\n", buffer);
+    //printf("%s\n", buffer);
     return nread;
 }
 
@@ -183,7 +183,7 @@ void * worker(void *arg) {
   request_t work;
   char* buffer;
   char filetype[20];
-  int size;
+  int size, nread;
   struct stat buf;
    while (1) {
     if (!empty_queue()) {
@@ -194,19 +194,28 @@ void * worker(void *arg) {
     if (stat(work.request, &buf) == 0) {
       printf("stat returned 0\n");
     }
+
     size = buf.st_size;
+    printf("size %d\n", size);
 
     // Get the data from the disk or the cache (extra credit B)
     buffer = malloc(size);
     printf("work.fd is: %d\n", work.fd);
-    readFromDisk(work.fd, buffer, size);
+    //readFromDisk(work.fd, buffer, size);
+    work.fd = open(work.request, 'r');
+    nread = read(work.fd, buffer, size);
+    printf("nread: %d", nread);
+    //close(work.fd);
 
     // Log the request into the file and terminal
 
     // return the result
     memset(filetype, '\0', 20);
     strcpy(filetype, getContentType(work.request));
-    return_result(work.fd, filetype, buffer, size);
+    printf("filetype: %s, size: %d\n", filetype, size);
+    if (return_result(work.fd, filetype, buffer, size) != 0) {
+      printf("problem with return result\n");
+    }
     free(buffer);
   }
 }
@@ -214,7 +223,7 @@ void * worker(void *arg) {
 }
 
 /**********************************************************************************/
-
+// ./web_server 9001 /home/berg2007/Desktop/4061/P3/CSCI-4061--Project-3/P3/p3/testing 1 1 0 100 0
 int main(int argc, char **argv) {
 
   // Error check on number of arguments
