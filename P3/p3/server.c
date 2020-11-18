@@ -27,7 +27,7 @@
 // structs:
 typedef struct request_queue {
    int fd;
-   char *request;
+   char request[BUFF_SIZE];
 } request_t;
 
 typedef struct cache_entry {
@@ -35,6 +35,16 @@ typedef struct cache_entry {
     char *request;
     char *content;
 } cache_entry_t;
+
+struct sigaction act;
+static volatile sig_atomic_t run = 1;
+
+/* Stop the printing until the next interrupt. */
+void exit_server(int signo) {
+  printf("ending server need to add more prints for graceful termination\n");
+  exit(0);
+}
+
 
 request_t queue[MAX_queue_len];
 int enqueue_index = 0;
@@ -48,6 +58,7 @@ request_t dequeue() {
 }
 
 void enqueue(request_t r) {
+  printf("in enqueue, adding %d, %s\n", r.fd, r.request);
   queue[enqueue_index] = r;
   enqueue_index++;
   dequeue_index = dequeue_index % MAX_queue_len;
@@ -74,6 +85,7 @@ void * dynamic_pool_size_update(void *arg) {
 // Function to check whether the given request is present in cache
 int getCacheIndex(char *request){
   /// return the index if the request is present in the cache
+  return 0;
 }
 
 // Function to add the request and its file content into the cache
@@ -101,42 +113,64 @@ char* getContentType(char * mybuf) {
   // (See Section 5 in Project description for more details)
   char *type;
   const char* delimiter = ",";
-	char* signature = strtok(mybuf, delimiter);
+	char signature[BUFF_SIZE];
+  memset(signature, '\0', BUFF_SIZE);
+  strcpy(signature, strtok(mybuf, delimiter));
+  printf("signature is %s\n",signature);
+  printf("last char of signature is %c\n",signature[strlen(signature)-1]);
+  char last_char = signature[strlen(signature)-1];
 
-	if(strcmp(signature, "html")){
+	if(last_char == 'l' || last_char == 'm'){
 		type = "text/html";
 	}
-	else if (strcmp(signature, "jpg")){
+	else if (last_char == 'g'){
 		type = "image/jpeg";
 	}
-	else if(strcmp(signature,"gif")){
+	else if(last_char == 'f'){
 		type = "image/gif";
 	}
-	else{
+	else {
 		type = "text/plain";
 	}
-
+  printf("found type as %s\n",type);
 	return type;
 }
 
 // Function to open and read the file from the disk into the memory
 // Add necessary arguments as needed
-int readFromDisk(/*necessary arguments*/) {
+int readFromDisk(int fd, char* buffer, int n_bytes) {
     // Open and read the contents of file given the request
+    printf("reading %d bytes\n", n_bytes);
+    int nread = read(fd, buffer, n_bytes);
+    printf("nread is %d\n", nread);
+    printf("%s\n", buffer);
+    return nread;
 }
 
 /**********************************************************************************/
 
 // Function to receive the request from the client and add to the queue
 void * dispatch(void *arg) {
-
+  int fd;
+  char buffer[BUFF_SIZE];
+  request_t disp;
   while (1) {
 
     // Accept client connection
+    fd = accept_connection();
 
     // Get request from the client
+    get_request(fd, buffer);
+    printf("got request, buffer is %s\n", buffer);
 
     // Add the request into the queue
+    disp.fd = fd;
+    memset(disp.request, '\0', BUFF_SIZE);
+    sprintf(disp.request, "%s%s", (char*) arg, buffer);
+    printf("disp.request = %s\n", disp.request);
+    //strcpy(disp.request, buffer);
+
+    enqueue(disp);
 
    }
    return NULL;
@@ -146,17 +180,36 @@ void * dispatch(void *arg) {
 
 // Function to retrieve the request from the queue, process it and then return a result to the client
 void * worker(void *arg) {
-
+  request_t work;
+  char* buffer;
+  char filetype[20];
+  int size;
+  struct stat buf;
    while (1) {
+    if (!empty_queue()) {
 
     // Get the request from the queue
+    work = dequeue();
+    printf("work.request = %s\n", work.request);
+    if (stat(work.request, &buf) == 0) {
+      printf("stat returned 0\n");
+    }
+    size = buf.st_size;
 
     // Get the data from the disk or the cache (extra credit B)
+    buffer = malloc(size);
+    printf("work.fd is: %d\n", work.fd);
+    readFromDisk(work.fd, buffer, size);
 
     // Log the request into the file and terminal
 
     // return the result
+    memset(filetype, '\0', 20);
+    strcpy(filetype, getContentType(work.request));
+    return_result(work.fd, filetype, buffer, size);
+    free(buffer);
   }
+}
   return NULL;
 }
 
@@ -171,25 +224,36 @@ int main(int argc, char **argv) {
   }
 
   // Get the input args
-
+  int port = strtol(argv[1], NULL, 10);
+  char* path = argv[2];
+  /*int num_dispatchers = strtol(argv[3], NULL, 10);
+  int num_workers = strtol(argv[4], NULL, 10);
+  int dynamic_flag = strtol(argv[5], NULL, 10);
+  int queue_length = strtol(argv[6], NULL, 10);
+  int cache_entries = strtol(argv[7], NULL, 10);*/
   // Perform error checks on the input arguments
 
   // Change SIGINT action for grace termination
-
+  act.sa_handler = exit_server;
+  act.sa_flags=0;
+  sigemptyset(&act.sa_mask);
+  sigaction(SIGINT, &act, NULL);
   // Open log file
-
+  FILE* log_file = fopen("webserver_log", "w");
   // Change the current working directory to server root directory
-
+  chdir(path);
   // Initialize cache (extra credit B)
 
   // Start the server
+  init(port);
 
   // Create dispatcher and worker threads (all threads should be detachable)
 
   request_t temp;
   temp.fd = 1;
-  temp.request = "test";
-  if (empty_queue) {
+  strcpy(temp.request, "test");
+  //temp.request = "test";
+  if (empty_queue()) {
     printf("empty queue\n");
   }
   enqueue(temp);
@@ -197,18 +261,18 @@ int main(int argc, char **argv) {
   printf("%d, %s\n", r.fd, r.request);
 
   pthread_t dispatcherID;
-  char* dummy_arg = "this is just to test the pthread_create";
-  if (pthread_create(&dispatcherID, NULL, dispatch, (void*) dummy_arg)) {
+  //char* dummy_arg = "this is just to test the pthread_create";
+  if (pthread_create(&dispatcherID, NULL, dispatch, (void*) path)) {
     printf("failed to create dispatcher thread\n");
   } else {
     printf("created dispatcher thread\n");
   }
 
   pthread_t workerID;
-  if (pthread_create(&workerID, NULL, worker, (void*) dummy_arg)) {
-    printf("failed to create dispatcher thread\n");
+  if (pthread_create(&workerID, NULL, worker, (void*) path)) {
+    printf("failed to create worker thread\n");
   } else {
-    printf("created dispatcher thread\n");
+    printf("created worker thread\n");
   }
 
 
@@ -218,6 +282,6 @@ int main(int argc, char **argv) {
     // Print the number of pending requests in the request queue
     // close log file
     // Remove cache (extra credit B)
-
+    while (1) {}
   return 0;
 }
