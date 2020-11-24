@@ -37,12 +37,12 @@ typedef struct cache_entry {
 } cache_entry_t;
 
 struct sigaction act;
-static volatile sig_atomic_t run = 1;
+static volatile sig_atomic_t run = 0;
+
 
 /* Stop the printing until the next interrupt. */
 void exit_server(int signo) {
-  printf("\nending server need to add more prints for graceful termination\n");
-  exit(0);
+  run = 1;
 }
 
 
@@ -248,8 +248,12 @@ int main(int argc, char **argv) {
   // Change SIGINT action for grace termination
   act.sa_handler = exit_server;
   act.sa_flags=0;
-  sigemptyset(&act.sa_mask);
-  sigaction(SIGINT, &act, NULL);
+  if(sigemptyset(&act.sa_mask) == INVALID || sigaction(SIGINT, &act, NULL) == INVALID){
+	printf("Error SIGINT.\n");
+	return INVALID;
+  }
+  //sigemptyset(&act.sa_mask);
+  //sigaction(SIGINT, &act, NULL);
   // Open log file
   // FILE* log_file = fopen("webserver_log", "w");
   // Change the current working directory to server root directory
@@ -294,6 +298,8 @@ int main(int argc, char **argv) {
     // Print the number of pending requests in the request queue
     // close log file
     // Remove cache (extra credit B)
-    while (1) {}
+    while (!run) {
+	sleep(1);
+    }
   return 0;
 }
