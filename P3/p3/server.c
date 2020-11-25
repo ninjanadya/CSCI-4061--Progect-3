@@ -45,7 +45,6 @@ void exit_server(int signo) {
   run = 1;
 }
 
-/// TODO: fix queue size, set in main
 request_t queue[MAX_queue_len];
 int enqueue_index = 0;
 int dequeue_index = 0;
@@ -262,6 +261,7 @@ void * worker(void *arg) {
       fprintf(log_file, "[%ld][%d][%d][%s][%s]\n", pthread_self(), reqnum, work.fd, work.request, "Requested file not found.");
     }
     free(buffer);
+    // need to close the file in graceful termination
   }
 }
   return NULL;
