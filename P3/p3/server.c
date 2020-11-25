@@ -61,7 +61,7 @@ void enqueue(request_t r) {
   printf("in enqueue, adding %d, %s\n", r.fd, r.request);
   queue[enqueue_index] = r;
   enqueue_index++;
-  dequeue_index = dequeue_index % MAX_queue_len;
+  enqueue_index = enqueue_index % MAX_queue_len;
 }
 
 bool empty_queue() {
@@ -72,6 +72,7 @@ bool full_queue() {
   return (dequeue_index - enqueue_index) % MAX_queue_len == 1;
 }
 
+// initialize the thread synchronization variables
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t some_content = PTHREAD_COND_INITIALIZER;
 pthread_cond_t free_slot = PTHREAD_COND_INITIALIZER;
@@ -185,6 +186,7 @@ void * dispatch(void *arg) {
       pthread_cond_wait(&some_content, &lock);
     }
     enqueue(disp);
+    printf("enq index: %d,  deq index: %d\n", enqueue_index, dequeue_index);
     pthread_cond_signal(&free_slot);
     pthread_mutex_unlock(&lock);
    }
@@ -208,6 +210,7 @@ void * worker(void *arg) {
     while (empty_queue()) {
       pthread_cond_wait(&free_slot, &lock);
     }
+    printf("enq index: %d,  deq index: %d\n", enqueue_index, dequeue_index);
     work = dequeue();
     pthread_cond_signal(&some_content);
     pthread_mutex_unlock(&lock);
