@@ -45,7 +45,7 @@ void exit_server(int signo) {
   run = 1;
 }
 
-
+/// TODO: fix queue size, set in main
 request_t queue[MAX_queue_len];
 int enqueue_index = 0;
 int dequeue_index = 0;
@@ -67,6 +67,14 @@ void enqueue(request_t r) {
 bool empty_queue() {
   return enqueue_index == dequeue_index;
 }
+
+bool full_queue() {
+  return (dequeue_index - enqueue_index) % MAX_queue_len == 1;
+}
+
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t some_content = PTHREAD_COND_INITIALIZER;
+pthread_cond_t free_slot = PTHREAD_COND_INITIALIZER;
 
 
 /* ******************** Dynamic Pool Code  [Extra Credit A] **********************/
@@ -116,8 +124,8 @@ char* getContentType(char * mybuf) {
 	char signature[BUFF_SIZE];
   memset(signature, '\0', BUFF_SIZE);
   strcpy(signature, strtok(mybuf, delimiter));
-  printf("signature is %s\n",signature);
-  printf("last char of signature is %c\n",signature[strlen(signature)-1]);
+  //printf("signature is %s\n",signature);
+  //printf("last char of signature is %c\n",signature[strlen(signature)-1]);
   char last_char = signature[strlen(signature)-1];
 
 	if(last_char == 'l' || last_char == 'm'){
@@ -162,18 +170,23 @@ void * dispatch(void *arg) {
 
     // Get request from the client
     get_request(fd, buffer);
-    printf("got request, buffer is %s\n", buffer);
+    //printf("got request, buffer is %s\n", buffer);
 
     // Add the request into the queue
     disp.fd = fd;
-    printf("accept connection fd = %d\n", fd);
+    //printf("accept connection fd = %d\n", fd);
     memset(disp.request, '\0', BUFF_SIZE);
     sprintf(disp.request, "%s%s", (char*) arg, buffer);
-    printf("disp.request = %s\n", disp.request);
+    //printf("disp.request = %s\n", disp.request);
     //strcpy(disp.request, buffer);
 
+    pthread_mutex_lock(&lock);
+    while (full_queue()) {
+      pthread_cond_wait(&some_content, &lock);
+    }
     enqueue(disp);
-
+    pthread_cond_signal(&free_slot);
+    pthread_mutex_unlock(&lock);
    }
    return NULL;
 }
@@ -191,22 +204,30 @@ void * worker(void *arg) {
     if (!empty_queue()) {
 
     // Get the request from the queue
+    pthread_mutex_lock(&lock);
+    while (empty_queue()) {
+      pthread_cond_wait(&free_slot, &lock);
+    }
     work = dequeue();
-    printf("work.request = %s\n", work.request);
+    pthread_cond_signal(&some_content);
+    pthread_mutex_unlock(&lock);
+
+
+    //printf("work.request = %s\n", work.request);
     if (stat(work.request, &buf) == 0) {
       printf("stat returned 0\n");
     }
 
     size = buf.st_size;
-    printf("size %d\n", size);
+    //printf("size %d\n", size);
 
     // Get the data from the disk or the cache (extra credit B)
     buffer = malloc(size);
-    printf("work.fd is: %d\n", work.fd);
+    //printf("work.fd is: %d\n", work.fd);
     nread = readFromDisk(work.request, buffer, size);
     //work.fd = open(work.request, 'r');
     //nread = read(work.fd, buffer, size);
-    printf("nread: %d\n", nread);
+    //printf("nread: %d\n", nread);
     //close(work.fd);
 
     // Log the request into the file and terminal
@@ -214,7 +235,7 @@ void * worker(void *arg) {
     // return the result
     memset(filetype, '\0', 20);
     strcpy(filetype, getContentType(work.request));
-    printf("filetype: %s, size: %d\n", filetype, size);
+    //printf("filetype: %s, size: %d\n", filetype, size);
     if (return_result(work.fd, filetype, buffer, size) != 0) {
       printf("problem with return result\n");
     }
@@ -238,12 +259,33 @@ int main(int argc, char **argv) {
   // Get the input args
   int port = strtol(argv[1], NULL, 10);
   char* path = argv[2];
-  /*int num_dispatchers = strtol(argv[3], NULL, 10);
+  int num_dispatchers = strtol(argv[3], NULL, 10);
   int num_workers = strtol(argv[4], NULL, 10);
   int dynamic_flag = strtol(argv[5], NULL, 10);
   int queue_length = strtol(argv[6], NULL, 10);
-  int cache_entries = strtol(argv[7], NULL, 10);*/
+  int cache_entries = strtol(argv[7], NULL, 10);
+
   // Perform error checks on the input arguments
+  if (num_dispatchers > MAX_THREADS) {
+    printf("number of dispatchers must be <= 100\n");
+    exit(1);
+  }
+  if (num_workers > MAX_THREADS) {
+    printf("number of workers must be <= 100\n");
+    exit(1);
+  }
+  if (queue_length > MAX_queue_len) {
+    printf("queue length must be <= 100\n");
+    exit(1);
+  }
+  if (cache_entries > MAX_CE) {
+    printf("cache size must be <= 100\n");
+    exit(1);
+  }
+  if (strlen(path) > BUFF_SIZE) {
+    printf("filename length must be <= 1024\n");
+    exit(1);
+  }
 
   // Change SIGINT action for grace termination
   act.sa_handler = exit_server;
@@ -276,30 +318,35 @@ int main(int argc, char **argv) {
   request_t r = dequeue();
   printf("%d, %s\n", r.fd, r.request);
 
-  pthread_t dispatcherID;
-  //char* dummy_arg = "this is just to test the pthread_create";
-  if (pthread_create(&dispatcherID, NULL, dispatch, (void*) path)) {
-    printf("failed to create dispatcher thread\n");
-  } else {
-    printf("created dispatcher thread\n");
+  pthread_t dispatcherID[num_dispatchers];
+  for (int i = 0; i < num_dispatchers; i++) {
+    if (pthread_create(&dispatcherID[i], NULL, dispatch, (void*) path)) {
+      printf("failed to create dispatcher thread\n");
+    } else {
+      printf("created dispatcher thread\n");
+    }
   }
 
-  pthread_t workerID;
-  if (pthread_create(&workerID, NULL, worker, (void*) path)) {
-    printf("failed to create worker thread\n");
-  } else {
-    printf("created worker thread\n");
+  // create an array of workerIDs and spawn the workers
+  pthread_t workerID[num_workers];
+  for (int i = 0; i < num_workers; i++) {
+    if (pthread_create(&workerID[i], NULL, worker, (void*) path)) {
+      printf("failed to create worker thread\n");
+    } else {
+      printf("created worker thread\n");
+    }
   }
+
 
 
   // Create dynamic pool manager thread (extra credit A)
 
   // Terminate server gracefully
-    // Print the number of pending requests in the request queue
-    // close log file
-    // Remove cache (extra credit B)
-    while (!run) {
-	sleep(1);
-    }
+  // Print the number of pending requests in the request queue
+  // close log file
+  // Remove cache (extra credit B)
+  while (!run) {
+	   sleep(1);
+  }
   return 0;
 }
