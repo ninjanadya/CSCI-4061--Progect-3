@@ -354,5 +354,11 @@ int main(int argc, char **argv) {
   while (!run) {
 	   sleep(1);
   }
+
+  printf("\nNumber of pending requests in queue: %d\n", enqueue_index - dequeue_index);
+  
+    
+  fclose(log_file);
+
   return 0;
 }
