@@ -49,25 +49,30 @@ void exit_server(int signo) {
 request_t queue[MAX_queue_len];
 int enqueue_index = 0;
 int dequeue_index = 0;
+int global_queue_length;
 
+// removes and returns the next request_t struct from the queue
 request_t dequeue() {
   request_t temp = queue[dequeue_index];
   dequeue_index++;
-  dequeue_index = dequeue_index % MAX_queue_len;
+  dequeue_index = dequeue_index % global_queue_length;
   return temp;
 }
 
+// adds a request_t struct to the queue
 void enqueue(request_t r) {
-  printf("in enqueue, adding %d, %s\n", r.fd, r.request);
+  //printf("in enqueue, adding %d, %s\n", r.fd, r.request);
   queue[enqueue_index] = r;
   enqueue_index++;
-  enqueue_index = enqueue_index % MAX_queue_len;
+  enqueue_index = enqueue_index % global_queue_length;
 }
 
+// returns true if the queue is empty
 bool empty_queue() {
   return enqueue_index == dequeue_index;
 }
 
+// returns true if the queue is full
 bool full_queue() {
   return (dequeue_index - enqueue_index) % MAX_queue_len == 1;
 }
@@ -76,6 +81,8 @@ bool full_queue() {
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t some_content = PTHREAD_COND_INITIALIZER;
 pthread_cond_t free_slot = PTHREAD_COND_INITIALIZER;
+
+FILE* log_file;
 
 
 /* ******************** Dynamic Pool Code  [Extra Credit A] **********************/
@@ -141,7 +148,7 @@ char* getContentType(char * mybuf) {
 	else {
 		type = "text/plain";
 	}
-  printf("found type as %s\n",type);
+  //printf("found type as %s\n",type);
 	return type;
 }
 
@@ -151,7 +158,7 @@ int readFromDisk(char* filename, char* buffer, int n_bytes) {
     // Open and read the contents of file given the request
     int fd = open(filename, 'r');
     int nread = read(fd, buffer, n_bytes);
-    printf("nread: %d\n", nread);
+    //printf("nread: %d\n", nread);
     close(fd);
     //printf("%s\n", buffer);
     return nread;
@@ -176,17 +183,17 @@ void * dispatch(void *arg) {
     // Add the request into the queue
     disp.fd = fd;
     //printf("accept connection fd = %d\n", fd);
-    memset(disp.request, '\0', BUFF_SIZE);
-    sprintf(disp.request, "%s%s", (char*) arg, buffer);
+    //memset(disp.request, '\0', BUFF_SIZE);
+    //sprintf(disp.request, "%s%s", (char*) arg, buffer);
     //printf("disp.request = %s\n", disp.request);
-    //strcpy(disp.request, buffer);
+    strcpy(disp.request, buffer);
 
     pthread_mutex_lock(&lock);
     while (full_queue()) {
       pthread_cond_wait(&some_content, &lock);
     }
     enqueue(disp);
-    printf("enq index: %d,  deq index: %d\n", enqueue_index, dequeue_index);
+    //printf("enq index: %d,  deq index: %d\n", enqueue_index, dequeue_index);
     pthread_cond_signal(&free_slot);
     pthread_mutex_unlock(&lock);
    }
@@ -199,26 +206,30 @@ void * dispatch(void *arg) {
 void * worker(void *arg) {
   request_t work;
   char* buffer;
+  char full_path[BUFF_SIZE];
   char filetype[20];
-  int size, nread;
+  int size, nread, reqnum = 0;
   struct stat buf;
    while (1) {
     if (!empty_queue()) {
+      reqnum++;
 
     // Get the request from the queue
     pthread_mutex_lock(&lock);
     while (empty_queue()) {
       pthread_cond_wait(&free_slot, &lock);
     }
-    printf("enq index: %d,  deq index: %d\n", enqueue_index, dequeue_index);
+    //printf("enq index: %d,  deq index: %d\n", enqueue_index, dequeue_index);
     work = dequeue();
     pthread_cond_signal(&some_content);
     pthread_mutex_unlock(&lock);
 
+    memset(full_path, '\0', BUFF_SIZE);
+    sprintf(full_path, "%s%s", (char*) arg, work.request);
 
     //printf("work.request = %s\n", work.request);
-    if (stat(work.request, &buf) == 0) {
-      printf("stat returned 0\n");
+    if (stat(full_path, &buf) != 0) {
+      printf("stat returned nonzero\n");
     }
 
     size = buf.st_size;
@@ -227,7 +238,7 @@ void * worker(void *arg) {
     // Get the data from the disk or the cache (extra credit B)
     buffer = malloc(size);
     //printf("work.fd is: %d\n", work.fd);
-    nread = readFromDisk(work.request, buffer, size);
+    nread = readFromDisk(full_path, buffer, size);
     //work.fd = open(work.request, 'r');
     //nread = read(work.fd, buffer, size);
     //printf("nread: %d\n", nread);
@@ -237,12 +248,19 @@ void * worker(void *arg) {
 
     // return the result
     memset(filetype, '\0', 20);
-    strcpy(filetype, getContentType(work.request));
+    strcpy(filetype, getContentType(full_path));
     //printf("filetype: %s, size: %d\n", filetype, size);
     if (return_result(work.fd, filetype, buffer, size) != 0) {
       printf("problem with return result\n");
     }
 
+    if (nread > 0) {
+      printf("[%ld][%d][%d][%s][%d]\n", pthread_self(), reqnum, work.fd, work.request, nread);
+      fprintf(log_file, "[%ld][%d][%d][%s][%d]\n", pthread_self(), reqnum, work.fd, work.request, nread);
+    } else {
+      printf("[%ld][%d][%d][%s][%s]\n", pthread_self(), reqnum, work.fd, work.request, "Requested file not found.");
+      fprintf(log_file, "[%ld][%d][%d][%s][%s]\n", pthread_self(), reqnum, work.fd, work.request, "Requested file not found.");
+    }
     free(buffer);
   }
 }
@@ -266,6 +284,7 @@ int main(int argc, char **argv) {
   int num_workers = strtol(argv[4], NULL, 10);
   int dynamic_flag = strtol(argv[5], NULL, 10);
   int queue_length = strtol(argv[6], NULL, 10);
+  global_queue_length = queue_length;
   int cache_entries = strtol(argv[7], NULL, 10);
 
   // Perform error checks on the input arguments
@@ -297,50 +316,34 @@ int main(int argc, char **argv) {
 	printf("Error SIGINT.\n");
 	return INVALID;
   }
-  //sigemptyset(&act.sa_mask);
-  //sigaction(SIGINT, &act, NULL);
+  sigemptyset(&act.sa_mask);
+  sigaction(SIGINT, &act, NULL);
+
   // Open log file
-  // FILE* log_file = fopen("webserver_log", "w");
+  log_file = fopen("webserver_log", "w");
+
   // Change the current working directory to server root directory
   chdir(path);
+
   // Initialize cache (extra credit B)
 
   // Start the server
   init(port);
 
   // Create dispatcher and worker threads (all threads should be detachable)
-
-  request_t temp;
-  temp.fd = 1;
-  strcpy(temp.request, "test");
-  //temp.request = "test";
-  if (empty_queue()) {
-    printf("empty queue\n");
-  }
-  enqueue(temp);
-  request_t r = dequeue();
-  printf("%d, %s\n", r.fd, r.request);
-
   pthread_t dispatcherID[num_dispatchers];
   for (int i = 0; i < num_dispatchers; i++) {
-    if (pthread_create(&dispatcherID[i], NULL, dispatch, (void*) path)) {
+    if (pthread_create(&(dispatcherID[i]), NULL, dispatch, (void*) path)) {
       printf("failed to create dispatcher thread\n");
-    } else {
-      printf("created dispatcher thread\n");
     }
   }
 
-  // create an array of workerIDs and spawn the workers
   pthread_t workerID[num_workers];
   for (int i = 0; i < num_workers; i++) {
-    if (pthread_create(&workerID[i], NULL, worker, (void*) path)) {
+    if (pthread_create(&(workerID[i]), NULL, worker, (void*) path)) {
       printf("failed to create worker thread\n");
-    } else {
-      printf("created worker thread\n");
     }
   }
-
-
 
   // Create dynamic pool manager thread (extra credit A)
 
